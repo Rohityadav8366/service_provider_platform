@@ -1,0 +1,191 @@
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      routes:
+        # User Service Routes
+        - id: user-service-public
+          uri: lb://user-service
+          predicates:
+            - Path=/api/users/register, /api/users/login, /api/users/verify-email
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: userServiceCircuitBreaker
+                fallbackUri: forward:/fallback/users
+
+        - id: user-service-secured
+          uri: lb://user-service
+          predicates:
+            - Path=/api/users/**
+          filters:
+            - JwtAuthenticationFilter
+            - name: CircuitBreaker
+              args:
+                name: userServiceCircuitBreaker
+
+        # Service Catalog Routes
+        - id: service-catalog-public
+          uri: lb://service-catalog-service
+          predicates:
+            - Path=/api/services/**, /api/categories/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: serviceCatalogCircuitBreaker
+
+        - id: service-catalog-secured
+          uri: lb://service-catalog-service
+          predicates:
+            - Path=/api/providers/**
+          filters:
+            - JwtAuthenticationFilter
+            - name: CircuitBreaker
+              args:
+                name: serviceCatalogCircuitBreaker
+
+        # Booking Service Routes (All secured)
+        - id: booking-service
+          uri: lb://booking-service
+          predicates:
+            - Path=/api/bookings/**, /api/slots/**
+          filters:
+            - JwtAuthenticationFilter
+            - name: CircuitBreaker
+              args:
+                name: bookingServiceCircuitBreaker
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+
+        # Payment Service Routes (All secured)
+        - id: payment-service
+          uri: lb://payment-service
+          predicates:
+            - Path=/api/payments/**, /api/invoices/**, /api/refunds/**
+          filters:
+            - JwtAuthenticationFilter
+            - name: CircuitBreaker
+              args:
+                name: paymentServiceCircuitBreaker
+
+        # Notification Service Routes (Secured)
+        - id: notification-service
+          uri: lb://notification-service
+          predicates:
+            - Path=/api/notifications/**
+          filters:
+            - JwtAuthenticationFilter
+            - name: CircuitBreaker
+              args:
+                name: notificationServiceCircuitBreaker
+
+        # Location Service Routes
+        - id: location-service-public
+          uri: lb://location-service
+          predicates:
+            - Path=/api/locations/nearby, /api/locations/distance
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: locationServiceCircuitBreaker
+
+        - id: location-service-secured
+          uri: lb://location-service
+          predicates:
+            - Path=/api/locations/**
+          filters:
+            - JwtAuthenticationFilter
+            - name: CircuitBreaker
+              args:
+                name: locationServiceCircuitBreaker
+
+        # Review & Rating Service Routes
+        - id: review-service-public
+          uri: lb://review-rating-service
+          predicates:
+            - Path=/api/reviews/provider/**, /api/ratings/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: reviewServiceCircuitBreaker
+
+        - id: review-service-secured
+          uri: lb://review-rating-service
+          predicates:
+            - Path=/api/reviews
+          filters:
+            - JwtAuthenticationFilter
+            - name: CircuitBreaker
+              args:
+                name: reviewServiceCircuitBreaker
+
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+        - AddResponseHeader=X-Response-Time, ${response-time}
+
+  # Redis Configuration for Rate Limiting
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 60000
+
+server:
+  port: 8080
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true
+
+# JWT Configuration
+jwt:
+  secret: mySecretKeyForJWTTokenGenerationAndValidation12345
+
+# Resilience4j Circuit Breaker Configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      userServiceCircuitBreaker:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10000
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+      bookingServiceCircuitBreaker:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10000
+      paymentServiceCircuitBreaker:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15000
+
+# Management & Monitoring
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,circuitbreakers,gateway
+  endpoint:
+    health:
+      show-details: always
+    gateway:
+      enabled: true
+
+# Logging
+logging:
+  level:
+    org.springframework.cloud.gateway: DEBUG
+    com.serviceplatform.gateway: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
